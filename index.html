@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>国内版·旅行抽屉 🗺️</title>
+    <!-- 使用国内 BootCDN 加速 Leaflet 库 -->
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdn.bootcdn.net/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <style>
+        :root {
+            --primary: #007aff; /* 苹果蓝风格 */
+            --accent: #ff3b30;
+            --bg: #f2f2f7;
+            --drawer-width: 85vw;
+        }
+
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; background: #000; }
+
+        /* 地图全屏 */
+        #map { height: 100%; width: 100%; z-index: 1; background: #f0f0f0; }
+
+        /* 菜单按钮 */
+        .menu-btn {
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
+            background: rgba(255,255,255,0.9); border-radius: 50%; width: 54px; height: 54px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-size: 26px; cursor: pointer;
+            backdrop-filter: blur(5px);
+        }
+
+        /* 侧滑抽屉 */
+        .drawer {
+            position: fixed; top: 0; left: calc(-1 * var(--drawer-width));
+            width: var(--drawer-width); height: 100%;
+            background: var(--bg); z-index: 2000;
+            transition: 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
+            display: flex; flex-direction: column;
+            box-shadow: 10px 0 30px rgba(0,0,0,0.2);
+        }
+        .drawer.active { left: 0; }
+
+        .drawer-header { padding: 40px 20px 20px; background: white; border-bottom: 1px solid #ddd; }
+        .drawer-header h2 { margin: 0; font-size: 1.4rem; color: #000; }
+        
+        .drawer-content { flex: 1; overflow-y: auto; padding: 15px; -webkit-overflow-scrolling: touch; }
+
+        .section { background: white; border-radius: 14px; padding: 18px; margin-bottom: 20px; }
+        .section-title { font-weight: bold; margin-bottom: 15px; color: #333; font-size: 1rem; border-left: 4px solid var(--primary); padding-left: 10px; }
+
+        input, select, textarea {
+            width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #efefef;
+            border-radius: 10px; background: #f9f9f9; font-size: 16px; box-sizing: border-box;
+            outline: none;
+        }
+        .btn {
+            background: var(--primary); color: white; border: none; width: 100%;
+            padding: 14px; border-radius: 12px; font-weight: bold; margin-top: 15px; font-size: 16px;
+            active { opacity: 0.7; }
+        }
+
+        /* 图片预览区 */
+        .img-upload {
+            width: 100%; height: 160px; background: #f0f0f0; border: 2px dashed #ddd;
+            border-radius: 12px; display: flex; align-items: center; justify-content: center;
+            margin-top: 10px; background-size: cover; background-position: center; color: #999;
+        }
+
+        /* 行程单 */
+        .itinerary-card { background: #fff; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #f0f0f0; position: relative; }
+        .del-btn { position: absolute; right: 10px; top: 10px; color: #ff3b30; font-size: 12px; }
+
+        /* 遮罩层 */
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.3); z-index: 1500; display: none;
+            backdrop-filter: blur(2px);
+        }
+        .overlay.active { display: block; }
+
+        .popup-img { width: 100%; border-radius: 8px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="menu-btn" onclick="toggleDrawer()">📋</div>
+
+<div class="drawer" id="myDrawer">
+    <div class="drawer-header">
+        <h2>我的国内旅行笔记</h2>
+        <div id="loc-status" style="font-size:0.8rem; color:var(--primary); margin-top:8px;">📍 点击地图即可选点</div>
+    </div>
+    
+    <div class="drawer-content">
+        <!-- 1. 城市跳转 -->
+        <div class="section">
+            <div class="section-title">🚀 切换城市</div>
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="citySearch" placeholder="如：北京、成都..." style="margin:0;">
+                <button class="btn" style="margin:0; width:70px; padding:10px;" onclick="cityJump()">跳转</button>
+            </div>
+        </div>
+
+        <!-- 2. 添加 -->
+        <div class="section">
+            <div class="section-title">📍 记录新地点</div>
+            <input type="text" id="in-name" placeholder="地点名称">
+            <div style="display:flex; gap:8px;">
+                <select id="in-day" style="flex:1"><option>Day 1</option><option>Day 2</option><option>Day 3</option><option>Day 4</option><option>Day 5</option></select>
+                <input type="time" id="in-time" style="flex:1">
+            </div>
+            <select id="in-type">
+                <option value="spot">🏞️ 景点景点</option>
+                <option value="food">🍱 必吃美食</option>
+            </select>
+            <div class="img-upload" id="img-pre" onclick="document.getElementById('file-in').click()">
+                <span>点击上传照片</span>
+            </div>
+            <input type="file" id="file-in" hidden accept="image/*" onchange="handleFile(this)">
+            <textarea id="in-desc" placeholder="备注：推荐菜、人均、门票等"></textarea>
+            
+            <button class="btn" onclick="saveData()">存入我的攻略</button>
+        </div>
+
+        <!-- 3. 清单 -->
+        <div class="section">
+            <div class="section-title">📅 行程单预览</div>
+            <div id="itinerary-box"></div>
+        </div>
+
+        <!-- 4. 管理 -->
+        <div class="section">
+            <div class="section-title">⚙️ 数据备份</div>
+            <button class="btn" style="background:#34c759;" onclick="exportJSON()">导出备份文件</button>
+            <button class="btn" style="background:#8e8e93; margin-top:10px;" onclick="document.getElementById('imp-file').click()">从文件恢复</button>
+            <input type="file" id="imp-file" hidden onchange="importJSON(this)">
+            <p style="font-size: 11px; color:#999; margin-top:10px; text-align:center;">* 数据保存在手机本地</p>
+        </div>
+    </div>
+</div>
+
+<div class="overlay" id="overlay" onclick="toggleDrawer()"></div>
+<div id="map"></div>
+
+<script>
+    let travelDB = JSON.parse(localStorage.getItem('CN_Travel_Data')) || [];
+    let curLat = null, curLng = null, curImg64 = "";
+
+    // 1. 初始化地图 - 切换为高德底图（国内秒开）
+    // 注意：高德地图切片地址，style=7为标准图，style=6为卫星图
+    const map = L.map('map', { zoomControl: false }).setView([39.9042, 116.4074], 12);
+    
+    L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+        subdomains: ["1", "2", "3", "4"],
+        attribution: '© 高德地图'
+    }).addTo(map);
+
+    map.on('click', e => {
+        curLat = e.latlng.lat;
+        curLng = e.latlng.lng;
+        document.getElementById('loc-status').innerText = `✅ 已选中：${curLat.toFixed(3)}, ${curLng.toFixed(3)}`;
+        setTimeout(toggleDrawer, 200);
+    });
+
+    function toggleDrawer() {
+        document.getElementById('myDrawer').classList.toggle('active');
+        document.getElementById('overlay').classList.toggle('active');
+        if(document.getElementById('myDrawer').classList.contains('active')) renderList();
+    }
+
+    // 2. 城市跳转 - 优化国内城市
+    const cityCoord = {
+        "北京": [39.9042, 116.4074], "上海": [31.2304, 121.4737], "成都": [30.5728, 104.0668],
+        "西安": [34.3416, 108.9398], "大理": [25.5927, 100.22], "丽江": [26.8721, 100.2297],
+        "杭州": [30.2741, 120.1551], "南京": [32.0603, 118.7969], "重庆": [29.563, 106.5516]
+    };
+
+    function cityJump() {
+        const city = document.getElementById('citySearch').value;
+        if(cityCoord[city]) {
+            map.flyTo(cityCoord[city], 12);
+            toggleDrawer();
+        } else {
+            // 如果不在库里，尝试使用国内可用的搜索（这里简单处理，实际可接高德API）
+            alert("正在尝试搜索 " + city);
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${city}`)
+                .then(r => r.json()).then(data => {
+                    if(data[0]) {
+                        map.flyTo([data[0].lat, data[0].lon], 12);
+                        toggleDrawer();
+                    } else {
+                        alert("未找到该城市，请手动缩放地图");
+                    }
+                }).catch(()=>alert("搜索服务稍忙，请手动移动地图"));
+        }
+    }
+
+    // 3. 图片与保存
+    function handleFile(input) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            curImg64 = e.target.result;
+            const pre = document.getElementById('img-pre');
+            pre.style.backgroundImage = `url(${curImg64})`;
+            pre.innerHTML = "";
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+
+    function saveData() {
+        const name = document.getElementById('in-name').value;
+        if(!name || !curLat) return alert("请在地图选点并输入名称");
+
+        const item = {
+            id: Date.now(),
+            name: name,
+            day: document.getElementById('in-day').value,
+            time: document.getElementById('in-time').value,
+            type: document.getElementById('in-type').value,
+            desc: document.getElementById('in-desc').value,
+            img: curImg64,
+            lat: curLat, lng: curLng
+        };
+
+        travelDB.push(item);
+        localStorage.setItem('CN_Travel_Data', JSON.stringify(travelDB));
+        renderMarkers();
+        resetForm();
+        toggleDrawer();
+    }
+
+    function resetForm() {
+        document.getElementById('in-name').value = "";
+        document.getElementById('in-desc').value = "";
+        curImg64 = "";
+        document.getElementById('img-pre').style.backgroundImage = "";
+        document.getElementById('img-pre').innerHTML = "<span>点击上传照片</span>";
+    }
+
+    function renderMarkers() {
+        map.eachLayer(l => { if(l instanceof L.CircleMarker) map.removeLayer(l); });
+        travelDB.forEach(p => {
+            const m = L.circleMarker([p.lat, p.lng], {
+                radius: 12, color: '#fff', weight: 3, fillOpacity: 0.9,
+                fillColor: p.type === 'food' ? '#ff3b30' : '#ffcc00'
+            }).addTo(map);
+            
+            const popup = `
+                <div style="width:200px">
+                    <strong style="font-size:16px">${p.name}</strong><br>
+                    <small>${p.day} ${p.time}</small>
+                    ${p.img ? `<img src="${p.img}" class="popup-img">` : ''}
+                    <p style="font-size:13px; margin-top:8px">${p.desc}</p>
+                </div>
+            `;
+            m.bindPopup(popup);
+        });
+    }
+
+    function renderList() {
+        const box = document.getElementById('itinerary-box');
+        box.innerHTML = "";
+        const days = [...new Set(travelDB.map(i => i.day))].sort();
+
+        days.forEach(day => {
+            box.innerHTML += `<div style="padding:10px 0; font-weight:bold; color:var(--primary)">${day}</div>`;
+            travelDB.filter(i => i.day === day).sort((a,b)=>a.time.localeCompare(b.time)).forEach(item => {
+                box.innerHTML += `
+                    <div class="itinerary-card">
+                        <span class="del-btn" onclick="deleteItem(${item.id})">删除</span>
+                        <b>${item.time}</b> ${item.name}
+                    </div>
+                `;
+            });
+        });
+    }
+
+    function deleteItem(id) {
+        if(confirm("确定删除？")) {
+            travelDB = travelDB.filter(i => i.id !== id);
+            localStorage.setItem('CN_Travel_Data', JSON.stringify(travelDB));
+            renderList();
+            renderMarkers();
+        }
+    }
+
+    function exportJSON() {
+        const blob = new Blob([JSON.stringify(travelDB)], {type: "application/json"});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `我的国内旅行计划.json`;
+        a.click();
+    }
+
+    function importJSON(input) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            travelDB = JSON.parse(e.target.result);
+            localStorage.setItem('CN_Travel_Data', JSON.stringify(travelDB));
+            renderMarkers();
+            alert("导入成功");
+        };
+        reader.readAsText(input.files[0]);
+    }
+
+    renderMarkers();
+</script>
+
+</body>
+</html>
